@@ -155,5 +155,3 @@ if uploaded_file:
         file_name="floorplan_output.json",
         mime="application/json"
     )
-
-pip install streamlit
