@@ -2,34 +2,12 @@ import os
 os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
 
 import json
-import torch
-import torchvision
-from torchvision import transforms
 from PIL import Image
 import numpy as np
 import re
 import streamlit as st
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-
-# -----------------------------
-# Load Model
-# -----------------------------
-@st.cache_resource
-def load_model():
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights="DEFAULT")
-    model.eval()
-    return model
-
-model = load_model()
-
-# -----------------------------
-# Transform
-# -----------------------------
-transform = transforms.Compose([
-    transforms.Resize((512, 512)),
-    transforms.ToTensor(),
-])
 
 # -----------------------------
 # Parse Dimensions
@@ -52,7 +30,7 @@ def detect_orientation(bbox):
     return "horizontal" if (x2 - x1) > (y2 - y1) else "vertical"
 
 # -----------------------------
-# Mock Data
+# Mock Data (Stable for Cloud)
 # -----------------------------
 room_texts = [
     ("BALCONY", "11' x 6'"),
@@ -74,11 +52,6 @@ approximate_bboxes = [
 # Generate JSON
 # -----------------------------
 def generate_json(image):
-    img_tensor = transform(image).unsqueeze(0)
-
-    with torch.no_grad():
-        _ = model(img_tensor)
-
     floorplan = {
         "properties": {
             "rooms": [],
@@ -92,12 +65,20 @@ def generate_json(image):
 
         floorplan["properties"]["rooms"].append({
             "name": name,
+            "type": name.lower().replace(" ", "_"),
             "dimensions": {
                 "width_ft": w,
                 "height_ft": h,
                 "area_sqft": round(w*h, 2) if w and h else None
             },
-            "orientation": detect_orientation(bbox)
+            "bounding_box_pixels": {
+                "x1": bbox[0],
+                "y1": bbox[1],
+                "x2": bbox[2],
+                "y2": bbox[3]
+            },
+            "orientation": detect_orientation(bbox),
+            "connected_to": []
         })
 
     return floorplan
@@ -127,9 +108,9 @@ def visualize_3d(floorplan):
                 ]
                 ax.add_collection3d(Poly3DCollection([face], alpha=0.3))
 
-    ax.set_xlabel('Width')
-    ax.set_ylabel('Height')
-    ax.set_zlabel('Z')
+    ax.set_xlabel('Width (ft)')
+    ax.set_ylabel('Height (ft)')
+    ax.set_zlabel('Height')
 
     return fig
 
@@ -138,20 +119,21 @@ def visualize_3d(floorplan):
 # -----------------------------
 st.title("🏠 Floor Plan Analyzer")
 
+st.write("Upload a floor plan image (e.g., 6.jpeg)")
+
 uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
     image = Image.open(uploaded_file)
 
-    # FIX image format issue
+    # Fix image issues
     if image.mode != "RGB":
         image = image.convert("RGB")
     image = Image.fromarray(np.array(image))
 
     st.image(image, caption="Uploaded Image")
 
-    with st.spinner("Analyzing..."):
-        result = generate_json(image)
+    result = generate_json(image)
 
     st.subheader("📊 JSON Output")
     st.json(result)
@@ -161,7 +143,7 @@ if uploaded_file:
     st.pyplot(fig)
 
     st.download_button(
-        "Download JSON",
+        "📥 Download JSON",
         data=json.dumps(result, indent=2),
-        file_name="output.json"
+        file_name="floorplan_output.json"
     )
